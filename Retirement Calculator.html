@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retirement Calculator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f3f4f6;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1500px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .panel-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .grid-cols-2 {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .grid-cols-4 {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        @media (max-width: 768px) {
+            .grid-cols-2, .grid-cols-4 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #4b5563;
+            margin-bottom: 0.25rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .summary-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .summary-card h3 {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #4b5563;
+            margin-bottom: 0.5rem;
+        }
+
+        .summary-card p {
+            font-size: 1.875rem;
+            font-weight: bold;
+        }
+
+        .text-green { color: #10b981; }
+        .text-blue { color: #3b82f6; }
+        .text-purple { color: #8b5cf6; }
+        .text-red { color: #ef4444; }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-bottom: 2rem;
+        }
+
+        .info-box {
+            background-color: #dbeafe;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1.5rem;
+        }
+
+        .info-box p {
+            font-size: 0.75rem;
+            color: #374151;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-box strong {
+            font-weight: 600;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+
+        table {
+            width: 100%;
+            font-size: 0.75rem;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 0.5rem;
+            text-align: right;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        th {
+            background-color: #f9fafb;
+            font-weight: 600;
+            color: #374151;
+            position: sticky;
+            top: 0;
+        }
+
+        th:first-child, td:first-child {
+            text-align: left;
+            position: sticky;
+            left: 0;
+            background: inherit;
+            z-index: 10;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        .retired-row {
+            background-color: #dbeafe !important;
+        }
+
+        .catch-up-indicator {
+            color: #10b981;
+            font-size: 0.75rem;
+            margin-left: 0.25rem;
+        }
+
+        .retired-indicator {
+            color: #3b82f6;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.25rem;
+        }
+
+        button {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 1rem;
+        }
+
+        button:hover {
+            background-color: #2563eb;
+        }
+
+        .scroll-hint {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Retirement Calculator</h1>
+
+        <div class="grid grid-cols-2">
+            <!-- Basic Settings -->
+            <div class="panel">
+                <h2 class="panel-title">Basic Settings</h2>
+                <div class="input-group">
+                    <label>Current Age</label>
+                    <input type="number" id="currentAge" value="30">
+                </div>
+                <div class="input-group">
+                    <label>Retirement Age</label>
+                    <input type="number" id="retirementAge" value="65">
+                </div>
+                <div class="input-group">
+                    <label>Life Expectancy</label>
+                    <input type="number" id="deathAge" value="90">
+                </div>
+                <div class="input-group">
+                    <label>Current Salary</label>
+                    <input type="number" id="salary" value="50000">
+                </div>
+                <div class="input-group">
+                    <label>Annual Salary Increase (%)</label>
+                    <input type="number" step="0.1" id="salaryIncrease" value="3">
+                </div>
+            </div>
+
+            <!-- Current Balances -->
+            <div class="panel">
+                <h2 class="panel-title">Current Balances</h2>
+                <div class="input-group">
+                    <label>401(k) Balance</label>
+                    <input type="number" id="currentBalance401k" value="15000">
+                </div>
+                <div class="input-group">
+                    <label>Roth IRA Balance</label>
+                    <input type="number" id="currentBalanceRoth" value="5000">
+                </div>
+                <div class="input-group">
+                    <label>HSA Balance</label>
+                    <input type="number" id="currentBalanceHSA" value="2000">
+                </div>
+                <div class="input-group">
+                    <label>Taxable Stocks/Bonds Balance</label>
+                    <input type="number" id="currentBalanceStocks" value="0">
+                </div>
+                <div class="input-group">
+                    <label>Savings Account Balance</label>
+                    <input type="number" id="currentBalanceSavings" value="5000">
+                </div>
+            </div>
+
+            <!-- Annual Contributions -->
+            <div class="panel">
+                <h2 class="panel-title">Annual Contributions</h2>
+                <div class="input-group">
+                    <label>401(k) Contribution</label>
+                    <input type="number" id="annualContribution401k" value="3000">
+                </div>
+                <div class="input-group">
+                    <label>Roth IRA Contribution</label>
+                    <input type="number" id="annualContributionRoth" value="3000">
+                </div>
+                <div class="input-group">
+                    <label>HSA Contribution</label>
+                    <input type="number" id="annualContributionHSA" value="2000">
+                </div>
+                <div class="input-group">
+                    <label>Taxable Stocks/Bonds Contribution</label>
+                    <input type="number" id="annualContributionStocks" value="0">
+                </div>
+                <div class="input-group">
+                    <label>Savings Account Contribution</label>
+                    <input type="number" id="annualContributionSavings" value="0">
+                </div>
+            </div>
+
+            <!-- Annual Contribution Increases -->
+            <div class="panel">
+                <h2 class="panel-title">Annual Contribution Increases</h2>
+                <div class="input-group">
+                    <label>401(k) Increase</label>
+                    <input type="number" id="contributionIncrease401k" value="500">
+                </div>
+                <div class="input-group">
+                    <label>Roth IRA Increase</label>
+                    <input type="number" id="contributionIncreaseRoth" value="100">
+                </div>
+                <div class="input-group">
+                    <label>HSA Increase</label>
+                    <input type="number" id="contributionIncreaseHSA" value="100">
+                </div>
+                <div class="input-group">
+                    <label>Taxable Stocks/Bonds Increase</label>
+                    <input type="number" id="contributionIncreaseStocks" value="0">
+                </div>
+                <div class="input-group">
+                    <label>Savings Account Increase</label>
+                    <input type="number" id="contributionIncreaseSavings" value="0">
+                </div>
+            </div>
+
+            <!-- Catch-Up Contributions -->
+            <div class="panel">
+                <h2 class="panel-title">Catch-Up Contributions (Age 50+)</h2>
+                <div class="input-group">
+                    <label>Catch-Up Start Age</label>
+                    <input type="number" id="catchUpAge" value="50">
+                </div>
+                <div class="input-group">
+                    <label>401(k) Catch-Up Amount</label>
+                    <input type="number" id="catchUpAmount401k" value="8000">
+                </div>
+                <div class="input-group">
+                    <label>Roth IRA Catch-Up Amount</label>
+                    <input type="number" id="catchUpAmountRoth" value="1000">
+                </div>
+                <div class="input-group">
+                    <label>HSA Catch-Up Amount</label>
+                    <input type="number" id="catchUpAmountHSA" value="1000">
+                </div>
+            </div>
+
+            <!-- Employer Contributions -->
+            <div class="panel">
+                <h2 class="panel-title">Employer Contributions</h2>
+                <div class="input-group">
+                    <label>Match Percentage (of contribution)</label>
+                    <input type="number" step="0.01" id="employeeMatchPercentage" value="0.5">
+                </div>
+                <div class="input-group">
+                    <label>Match Maximum (% of salary)</label>
+                    <input type="number" step="0.01" id="employeeMatchMaxPercent" value="0.06">
+                </div>
+                <div class="input-group">
+                    <label>Annual Profit Sharing Rate (% of salary)</label>
+                    <input type="number" step="0.01" id="profitSharingRate" value="0.03">
+                </div>
+            </div>
+
+            <!-- Investment Returns -->
+            <div class="panel">
+                <h2 class="panel-title">Investment Returns (Annual %)</h2>
+                <div class="input-group">
+                    <label>401(k), Roth IRA, HSA ROI (%)</label>
+                    <input type="number" step="0.1" id="roi" value="7">
+                </div>
+                <div class="input-group">
+                    <label>Taxable Stocks/Bonds ROI (%)</label>
+                    <input type="number" step="0.1" id="roiStocks" value="8">
+                </div>
+                <div class="input-group">
+                    <label>Savings Account ROI (%)</label>
+                    <input type="number" step="0.1" id="roiSavings" value="2">
+                </div>
+            </div>
+
+            <!-- Retirement Withdrawals -->
+            <div class="panel">
+                <h2 class="panel-title">Retirement Withdrawals & Taxes</h2>
+                <div class="input-group">
+                    <label>Annual Withdrawal Amount</label>
+                    <input type="number" id="annualWithdrawal" value="50000">
+                </div>
+                <div class="input-group">
+                    <label>Withdrawal Tax Rate (%)</label>
+                    <input type="number" step="0.1" id="withdrawalTaxRate" value="22">
+                </div>
+                <div class="input-group">
+                    <label>Early Withdrawal Penalty Rate (%)</label>
+                    <input type="number" step="0.1" id="earlyWithdrawalPenaltyRate" value="10">
+                </div>
+                <div class="input-group">
+                    <label>RMD Start Age</label>
+                    <input type="number" id="rmdStartAge" value="73">
+                </div>
+
+                <div class="info-box">
+                    <p><strong>Withdrawal Strategy:</strong></p>
+                    <p>1. 401(k) first (taxable)</p>
+                    <p>2. Roth IRA second (tax-free)</p>
+                    <p>3. HSA third (tax-free)</p>
+                    <p>4. Taxable investments fourth</p>
+                    <p>5. Savings last</p>
+                    <p style="margin-top: 0.5rem;"><strong>Penalties:</strong></p>
+                    <p>• 10% penalty before age 59.5</p>
+                    <p>• RMDs required at age 73+</p>
+                </div>
+            </div>
+        </div>
+
+        <button onclick="calculate()">Calculate</button>
+
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-4" style="margin-top: 2rem;">
+            <div class="summary-card">
+                <h3>Total Balance at Age <span id="summaryAge">90</span></h3>
+                <p class="text-green" id="finalBalance">$0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Total Contributed</h3>
+                <p class="text-blue" id="totalContributed">$0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Total Growth</h3>
+                <p class="text-purple" id="totalGrowth">$0</p>
+            </div>
+            <div class="summary-card">
+                <h3>Tax + Penalties</h3>
+                <p class="text-red" id="totalTaxPenalties">$0</p>
+            </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="panel" style="margin-top: 2rem;">
+            <h2 class="panel-title">Balance Projection</h2>
+            <div class="chart-container">
+                <canvas id="balanceChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="panel">
+            <h2 class="panel-title">Year-by-Year Breakdown</h2>
+            <p class="scroll-hint">Note: Table is horizontally scrollable →</p>
+            <div class="table-wrapper">
+                <table id="dataTable">
+                    <thead>
+                        <tr>
+                            <th>Age</th>
+                            <th>Salary</th>
+                            <th>401k Contrib</th>
+                            <th>Roth Contrib</th>
+                            <th>HSA Contrib</th>
+                            <th>Taxable Contrib</th>
+                            <th>Savings Contrib</th>
+                            <th>Employer</th>
+                            <th>401k Gain</th>
+                            <th>Roth Gain</th>
+                            <th>HSA Gain</th>
+                            <th>Taxable Gain</th>
+                            <th>Savings Gain</th>
+                            <th>W/D</th>
+                            <th>RMD</th>
+                            <th>Tax</th>
+                            <th>Pen</th>
+                            <th>401k Bal</th>
+                            <th>Roth Bal</th>
+                            <th>HSA Bal</th>
+                            <th>Taxable Bal</th>
+                            <th>Savings Bal</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let chart = null;
+
+        function formatCurrency(value) {
+            return '$' + Math.round(value).toLocaleString('en-US');
+        }
+
+        function getInputValue(id) {
+            return parseFloat(document.getElementById(id).value) || 0;
+        }
+
+        function calculateRMD(balance, age) {
+            const lifetimeFactors = {
+                73: 26.5, 74: 25.5, 75: 24.6, 76: 23.7, 77: 22.9, 78: 22.0, 79: 21.1,
+                80: 20.2, 81: 19.4, 82: 18.5, 83: 17.7, 84: 16.8, 85: 16.0, 86: 15.2,
+                87: 14.4, 88: 13.7, 89: 12.9, 90: 12.2, 91: 11.5, 92: 10.8, 93: 10.1,
+                94: 9.5, 95: 8.9, 96: 8.4, 97: 7.8, 98: 7.3, 99: 6.8, 100: 6.4
+            };
+            const factor = lifetimeFactors[age] || (age > 100 ? 6.4 : 26.5);
+            return balance / factor;
+        }
+
+        function calculate() {
+            // Get all inputs
+            const inputs = {
+                currentAge: getInputValue('currentAge'),
+                retirementAge: getInputValue('retirementAge'),
+                deathAge: getInputValue('deathAge'),
+                currentBalance401k: getInputValue('currentBalance401k'),
+                currentBalanceRoth: getInputValue('currentBalanceRoth'),
+                currentBalanceHSA: getInputValue('currentBalanceHSA'),
+                currentBalanceStocks: getInputValue('currentBalanceStocks'),
+                currentBalanceSavings: getInputValue('currentBalanceSavings'),
+                annualContribution401k: getInputValue('annualContribution401k'),
+                annualContributionRoth: getInputValue('annualContributionRoth'),
+                annualContributionHSA: getInputValue('annualContributionHSA'),
+                annualContributionStocks: getInputValue('annualContributionStocks'),
+                annualContributionSavings: getInputValue('annualContributionSavings'),
+                contributionIncrease401k: getInputValue('contributionIncrease401k'),
+                contributionIncreaseRoth: getInputValue('contributionIncreaseRoth'),
+                contributionIncreaseHSA: getInputValue('contributionIncreaseHSA'),
+                contributionIncreaseStocks: getInputValue('contributionIncreaseStocks'),
+                contributionIncreaseSavings: getInputValue('contributionIncreaseSavings'),
+                catchUpAge: getInputValue('catchUpAge'),
+                catchUpAmount401k: getInputValue('catchUpAmount401k'),
+                catchUpAmountRoth: getInputValue('catchUpAmountRoth'),
+                catchUpAmountHSA: getInputValue('catchUpAmountHSA'),
+                employeeMatchPercentage: getInputValue('employeeMatchPercentage'),
+                employeeMatchMaxPercent: getInputValue('employeeMatchMaxPercent'),
+                profitSharingRate: getInputValue('profitSharingRate'),
+                annualWithdrawal: getInputValue('annualWithdrawal'),
+                withdrawalTaxRate: getInputValue('withdrawalTaxRate') / 100,
+                earlyWithdrawalPenaltyRate: getInputValue('earlyWithdrawalPenaltyRate') / 100,
+                rmdStartAge: getInputValue('rmdStartAge'),
+                roi: getInputValue('roi') / 100,
+                roiStocks: getInputValue('roiStocks') / 100,
+                roiSavings: getInputValue('roiSavings') / 100,
+                salary: getInputValue('salary'),
+                salaryIncrease: getInputValue('salaryIncrease') / 100
+            };
+
+            const totalYears = inputs.deathAge - inputs.currentAge;
+            let balance401k = inputs.currentBalance401k;
+            let balanceRoth = inputs.currentBalanceRoth;
+            let balanceHSA = inputs.currentBalanceHSA;
+            let balanceStocks = inputs.currentBalanceStocks;
+            let balanceSavings = inputs.currentBalanceSavings;
+            let annualContribution401k = inputs.annualContribution401k;
+            let annualContributionRoth = inputs.annualContributionRoth;
+            let annualContributionHSA = inputs.annualContributionHSA;
+            let annualContributionStocks = inputs.annualContributionStocks;
+            let annualContributionSavings = inputs.annualContributionSavings;
+            let currentSalary = inputs.salary;
+            const monthlyRoi = inputs.roi / 12;
+            const monthlyRoiStocks = inputs.roiStocks / 12;
+            const monthlyRoiSavings = inputs.roiSavings / 12;
+            
+            const yearlyData = [];
+            let priorYearEnd401kBalance = inputs.currentBalance401k;
+            let totalContributed = 0;
+            let totalGrowth = 0;
+            let totalTaxPaid = 0;
+            let totalPenalties = 0;
+
+            for (let year = 0; year <= totalYears; year++) {
+                const currentAge = inputs.currentAge + year;
+                const isWorking = currentAge <= inputs.retirementAge;
+                let yearPersonalContributions401k = 0;
+                let yearPersonalContributionsRoth = 0;
+                let yearPersonalContributionsHSA = 0;
+                let yearPersonalContributionsStocks = 0;
+                let yearPersonalContributionsSavings = 0;
+                let yearEmployerContributions = 0;
+                let yearWithdrawals = 0;
+                let yearTaxPaid = 0;
+                let yearPenalties = 0;
+                let yearRMD = 0;
+                let yearGrowth401k = 0;
+                let yearGrowthRoth = 0;
+                let yearGrowthHSA = 0;
+                let yearGrowthStocks = 0;
+                let yearGrowthSavings = 0;
+                let catchUpIncluded = false;
+
+                const totalAnnualContribution401k = (isWorking && currentAge >= inputs.catchUpAge) 
+                    ? (catchUpIncluded = true, annualContribution401k + inputs.catchUpAmount401k)
+                    : annualContribution401k;
+                
+                const totalAnnualContributionRoth = (isWorking && currentAge >= inputs.catchUpAge) 
+                    ? annualContributionRoth + inputs.catchUpAmountRoth 
+                    : annualContributionRoth;
+                
+                const totalAnnualContributionHSA = (isWorking && currentAge >= inputs.catchUpAge) 
+                    ? annualContributionHSA + inputs.catchUpAmountHSA 
+                    : annualContributionHSA;
+
+                for (let month = 1; month <= 12; month++) {
+                    if (isWorking) {
+                        const monthlyContribution401k = totalAnnualContribution401k / 12;
+                        balance401k += monthlyContribution401k;
+                        yearPersonalContributions401k += monthlyContribution401k;
+                        
+                        const monthlyContributionRoth = totalAnnualContributionRoth / 12;
+                        balanceRoth += monthlyContributionRoth;
+                        yearPersonalContributionsRoth += monthlyContributionRoth;
+                        
+                        const monthlyContributionHSA = totalAnnualContributionHSA / 12;
+                        balanceHSA += monthlyContributionHSA;
+                        yearPersonalContributionsHSA += monthlyContributionHSA;
+                        
+                        const monthlyContributionStocks = annualContributionStocks / 12;
+                        balanceStocks += monthlyContributionStocks;
+                        yearPersonalContributionsStocks += monthlyContributionStocks;
+                        
+                        const monthlyContributionSavings = annualContributionSavings / 12;
+                        balanceSavings += monthlyContributionSavings;
+                        yearPersonalContributionsSavings += monthlyContributionSavings;
+                    } else {
+                        let requiredWithdrawal = inputs.annualWithdrawal / 12;
+                        
+                        if (month === 1 && currentAge >= inputs.rmdStartAge) {
+                            const rmd = calculateRMD(priorYearEnd401kBalance, currentAge);
+                            yearRMD = rmd;
+                            requiredWithdrawal = Math.max(rmd, inputs.annualWithdrawal) / 12;
+                        } else if (currentAge >= inputs.rmdStartAge && month > 1) {
+                            requiredWithdrawal = Math.max(yearRMD, inputs.annualWithdrawal) / 12;
+                        }
+                        
+                        const monthlyWithdrawal = requiredWithdrawal;
+                        
+                        let remaining = monthlyWithdrawal;
+                        
+                        // Withdraw from 401k first
+                        if (balance401k >= remaining) {
+                            balance401k -= remaining;
+                            yearWithdrawals += remaining;
+                            yearTaxPaid += remaining * inputs.withdrawalTaxRate;
+                            
+                            if (currentAge < 59.5) {
+                                yearPenalties += remaining * inputs.earlyWithdrawalPenaltyRate;
+                            }
+                            remaining = 0;
+                        } else if (balance401k > 0) {
+                            const partial401k = balance401k;
+                            balance401k = 0;
+                            yearWithdrawals += partial401k;
+                            yearTaxPaid += partial401k * inputs.withdrawalTaxRate;
+                            
+                            if (currentAge < 59.5) {
+                                yearPenalties += partial401k * inputs.earlyWithdrawalPenaltyRate;
+                            }
+                            remaining -= partial401k;
+                        }
+                        
+                        // Withdraw from Roth if needed
+                        if (remaining > 0) {
+                            if (balanceRoth >= remaining) {
+                                balanceRoth -= remaining;
+                                yearWithdrawals += remaining;
+                                remaining = 0;
+                            } else if (balanceRoth > 0) {
+                                const partialRoth = balanceRoth;
+                                balanceRoth = 0;
+                                yearWithdrawals += partialRoth;
+                                remaining -= partialRoth;
+                            }
+                        }
+                        
+                        // Withdraw from HSA if needed
+                        if (remaining > 0) {
+                            if (balanceHSA >= remaining) {
+                                balanceHSA -= remaining;
+                                yearWithdrawals += remaining;
+                                remaining = 0;
+                            } else if (balanceHSA > 0) {
+                                const partialHSA = balanceHSA;
+                                balanceHSA = 0;
+                                yearWithdrawals += partialHSA;
+                                remaining -= partialHSA;
+                            }
+                        }
+                        
+                        // Withdraw from taxable stocks if needed
+                        if (remaining > 0) {
+                            if (balanceStocks >= remaining) {
+                                balanceStocks -= remaining;
+                                yearWithdrawals += remaining;
+                                remaining = 0;
+                            } else if (balanceStocks > 0) {
+                                const partialStocks = balanceStocks;
+                                balanceStocks = 0;
+                                yearWithdrawals += partialStocks;
+                                remaining -= partialStocks;
+                            }
+                        }
+                        
+                        // Withdraw from savings as last resort
+                        if (remaining > 0) {
+                            if (balanceSavings >= remaining) {
+                                balanceSavings -= remaining;
+                                yearWithdrawals += remaining;
+                                remaining = 0;
+                            } else if (balanceSavings > 0) {
+                                yearWithdrawals += balanceSavings;
+                                balanceSavings = 0;
+                            }
+                        }
+                    }
+
+                    // Apply monthly growth
+                    const growth401k = balance401k * monthlyRoi;
+                    balance401k += growth401k;
+                    yearGrowth401k += growth401k;
+                    
+                    const growthRoth = balanceRoth * monthlyRoi;
+                    balanceRoth += growthRoth;
+                    yearGrowthRoth += growthRoth;
+                    
+                    const growthHSA = balanceHSA * monthlyRoi;
+                    balanceHSA += growthHSA;
+                    yearGrowthHSA += growthHSA;
+                    
+                    const growthStocks = balanceStocks * monthlyRoiStocks;
+                    balanceStocks += growthStocks;
+                    yearGrowthStocks += growthStocks;
+                    
+                    const growthSavings = balanceSavings * monthlyRoiSavings;
+                    balanceSavings += growthSavings;
+                    yearGrowthSavings += growthSavings;
+                }
+
+                // Calculate employer contributions for the year
+                if (isWorking) {
+                    const employeeContributionPercent = annualContribution401k / currentSalary;
+                    const matchableContribution = Math.min(employeeContributionPercent, inputs.employeeMatchMaxPercent) * currentSalary;
+                    const employerMatch = matchableContribution * inputs.employeeMatchPercentage;
+                    const profitSharing = currentSalary * inputs.profitSharingRate;
+                    yearEmployerContributions = employerMatch + profitSharing;
+                    balance401k += yearEmployerContributions;
+                }
+
+                // Store prior year-end balance for RMD calculation
+                priorYearEnd401kBalance = balance401k;
+
+                const totalBalance = balance401k + balanceRoth + balanceHSA + balanceStocks + balanceSavings;
+                
+                yearlyData.push({
+                    year: currentAge,
+                    salary: isWorking ? currentSalary : 0,
+                    personalContributions401k: yearPersonalContributions401k,
+                    personalContributionsRoth: yearPersonalContributionsRoth,
+                    personalContributionsHSA: yearPersonalContributionsHSA,
+                    personalContributionsStocks: yearPersonalContributionsStocks,
+                    personalContributionsSavings: yearPersonalContributionsSavings,
+                    employerContributions: yearEmployerContributions,
+                    growth401k: yearGrowth401k,
+                    growthRoth: yearGrowthRoth,
+                    growthHSA: yearGrowthHSA,
+                    growthStocks: yearGrowthStocks,
+                    growthSavings: yearGrowthSavings,
+                    withdrawals: yearWithdrawals,
+                    rmd: yearRMD,
+                    taxPaid: yearTaxPaid,
+                    penalties: yearPenalties,
+                    balance401k: balance401k,
+                    balanceRoth: balanceRoth,
+                    balanceHSA: balanceHSA,
+                    balanceStocks: balanceStocks,
+                    balanceSavings: balanceSavings,
+                    totalBalance: totalBalance,
+                    isRetired: !isWorking,
+                    catchUpIncluded: catchUpIncluded
+                });
+
+                // Update running totals
+                totalContributed += yearPersonalContributions401k + yearPersonalContributionsRoth + 
+                                   yearPersonalContributionsHSA + yearPersonalContributionsStocks + 
+                                   yearPersonalContributionsSavings + yearEmployerContributions;
+                totalGrowth += yearGrowth401k + yearGrowthRoth + yearGrowthHSA + yearGrowthStocks + yearGrowthSavings;
+                totalTaxPaid += yearTaxPaid;
+                totalPenalties += yearPenalties;
+
+                // Increase contributions and salary for next year
+                if (isWorking) {
+                    annualContribution401k += inputs.contributionIncrease401k;
+                    annualContributionRoth += inputs.contributionIncreaseRoth;
+                    annualContributionHSA += inputs.contributionIncreaseHSA;
+                    annualContributionStocks += inputs.contributionIncreaseStocks;
+                    annualContributionSavings += inputs.contributionIncreaseSavings;
+                    currentSalary *= (1 + inputs.salaryIncrease);
+                }
+            }
+
+            // Update summary
+            document.getElementById('summaryAge').textContent = inputs.deathAge;
+            document.getElementById('finalBalance').textContent = formatCurrency(yearlyData[yearlyData.length - 1].totalBalance);
+            document.getElementById('totalContributed').textContent = formatCurrency(totalContributed);
+            document.getElementById('totalGrowth').textContent = formatCurrency(totalGrowth);
+            document.getElementById('totalTaxPenalties').textContent = formatCurrency(totalTaxPaid + totalPenalties);
+
+            // Update chart
+            updateChart(yearlyData);
+
+            // Update table
+            updateTable(yearlyData);
+        }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('balanceChart').getContext('2d');
+            
+            if (chart) {
+                chart.destroy();
+            }
+
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.year),
+                    datasets: [
+                        {
+                            label: 'Total Balance',
+                            data: data.map(d => d.totalBalance),
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 3,
+                            tension: 0.1
+                        },
+                        {
+                            label: '401(k)',
+                            data: data.map(d => d.balance401k),
+                            borderColor: '#3b82f6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Roth IRA',
+                            data: data.map(d => d.balanceRoth),
+                            borderColor: '#8b5cf6',
+                            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'HSA',
+                            data: data.map(d => d.balanceHSA),
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Stocks/Bonds',
+                            data: data.map(d => d.balanceStocks),
+                            borderColor: '#06b6d4',
+                            backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Savings',
+                            data: data.map(d => d.balanceSavings),
+                            borderColor: '#84cc16',
+                            backgroundColor: 'rgba(132, 204, 22, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + formatCurrency(context.parsed.y);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + (value / 1000).toLocaleString() + 'K';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateTable(data) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                if (row.isRetired) {
+                    tr.className = 'retired-row';
+                }
+
+                tr.innerHTML = `
+                    <td>${row.year}${row.isRetired ? '<span class="retired-indicator">R</span>' : ''}</td>
+                    <td>${row.salary > 0 ? formatCurrency(row.salary) : '-'}</td>
+                    <td>${row.personalContributions401k > 0 ? formatCurrency(row.personalContributions401k) : '-'}${row.catchUpIncluded ? '<span class="catch-up-indicator">+</span>' : ''}</td>
+                    <td>${row.personalContributionsRoth > 0 ? formatCurrency(row.personalContributionsRoth) : '-'}</td>
+                    <td>${row.personalContributionsHSA > 0 ? formatCurrency(row.personalContributionsHSA) : '-'}</td>
+                    <td>${row.personalContributionsStocks > 0 ? formatCurrency(row.personalContributionsStocks) : '-'}</td>
+                    <td>${row.personalContributionsSavings > 0 ? formatCurrency(row.personalContributionsSavings) : '-'}</td>
+                    <td>${row.employerContributions > 0 ? formatCurrency(row.employerContributions) : '-'}</td>
+                    <td style="color: #8b5cf6;">${formatCurrency(row.growth401k)}</td>
+                    <td style="color: #8b5cf6;">${formatCurrency(row.growthRoth)}</td>
+                    <td style="color: #8b5cf6;">${formatCurrency(row.growthHSA)}</td>
+                    <td style="color: #8b5cf6;">${formatCurrency(row.growthStocks)}</td>
+                    <td style="color: #8b5cf6;">${formatCurrency(row.growthSavings)}</td>
+                    <td>${row.withdrawals > 0 ? formatCurrency(row.withdrawals) : '-'}</td>
+                    <td style="color: #f97316;">${row.rmd > 0 ? formatCurrency(row.rmd) : '-'}</td>
+                    <td style="color: #ef4444;">${row.taxPaid > 0 ? formatCurrency(row.taxPaid) : '-'}</td>
+                    <td style="color: #ef4444;">${row.penalties > 0 ? formatCurrency(row.penalties) : '-'}</td>
+                    <td style="font-weight: 600;">${formatCurrency(row.balance401k)}</td>
+                    <td style="font-weight: 600;">${formatCurrency(row.balanceRoth)}</td>
+                    <td style="font-weight: 600;">${formatCurrency(row.balanceHSA)}</td>
+                    <td style="font-weight: 600;">${formatCurrency(row.balanceStocks)}</td>
+                    <td style="font-weight: 600;">${formatCurrency(row.balanceSavings)}</td>
+                    <td style="font-weight: 600; color: #10b981;">${formatCurrency(row.totalBalance)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Calculate on page load
+        window.addEventListener('load', calculate);
+    </script>
+</body>
+</html>
