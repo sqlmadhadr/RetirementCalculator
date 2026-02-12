@@ -1,6 +1,44 @@
 import React, { useState, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
+// IRS Contribution Limits (2026)
+const IRS_LIMITS = {
+  '401k': {
+    standard: 24500,
+    catchUp: 8000,          // Age 50-59
+    superCatchUp: 11250,    // Age 60-63 (SECURE 2.0)
+    catchUpAge: 50,
+    superCatchUpAgeMin: 60,
+    superCatchUpAgeMax: 63,
+    annualIncrease: 500     // Assumed annual IRS increase
+  },
+  'rothIRA': {
+    standard: 7500,
+    catchUp: 1100,          // Age 50+
+    catchUpAge: 50,
+    annualIncrease: 500     // Assumed annual IRS increase
+  },
+  'hsa': {
+    standard: 8750,         // Family coverage
+    catchUp: 1000,          // Age 55+
+    catchUpAge: 55,
+    annualIncrease: 500     // Assumed annual IRS increase
+  }
+};
+
+// Validate and cap catch-up contributions to IRS limits
+const validateCatchUp = (inputValue, accountType, age) => {
+  const limits = IRS_LIMITS[accountType];
+  
+  // 401k has special super catch-up for ages 60-63
+  if (accountType === '401k' && age >= limits.superCatchUpAgeMin && age <= limits.superCatchUpAgeMax) {
+    return Math.min(inputValue, limits.superCatchUp);
+  }
+  
+  const limit = limits.catchUp;
+  return Math.min(inputValue, limit);
+};
+
 const RetirementCalculator = () => {
   const [inputs, setInputs] = useState({
     currentAge: 30,
@@ -23,7 +61,7 @@ const RetirementCalculator = () => {
     contributionIncreaseSavings: 0,
     catchUpAge: 50,
     catchUpAmount401k: 8000,
-    catchUpAmountRoth: 1000,
+    catchUpAmountRoth: 1100,
     catchUpAmountHSA: 1000,
     employeeMatchPercentage: 0.5,
     employeeMatchMaxPercent: 0.06,
@@ -38,6 +76,44 @@ const RetirementCalculator = () => {
     salary: 50000,
     salaryIncrease: 0.03
   });
+
+  const [columnVisibility, setColumnVisibility] = useState({
+    contributions: true,
+    gains: true,
+    withdrawals: true,
+    balances: true,
+    maxContribs: false
+  });
+
+  // Calculate IRS max contribution for a given year and age
+  const calculateIRSMax = (accountType, yearsFromNow, age) => {
+    const limits = IRS_LIMITS[accountType];
+    
+    // Inflate the standard limit using annual increase
+    const inflatedStandard = limits.standard + (limits.annualIncrease * yearsFromNow);
+    
+    // Determine catch-up amount based on age
+    let catchUpAmount = 0;
+    if (age >= limits.catchUpAge) {
+      // Catch-up amounts also increase
+      if (accountType === '401k' && age >= limits.superCatchUpAgeMin && age <= limits.superCatchUpAgeMax) {
+        // Super catch-up increases proportionally
+        const catchUpIncrease = Math.round((limits.superCatchUp / limits.standard) * limits.annualIncrease);
+        catchUpAmount = limits.superCatchUp + (catchUpIncrease * yearsFromNow);
+      } else {
+        // Standard catch-up increases proportionally
+        const catchUpIncrease = Math.round((limits.catchUp / limits.standard) * limits.annualIncrease);
+        catchUpAmount = limits.catchUp + (catchUpIncrease * yearsFromNow);
+      }
+    }
+    
+    // HSA catch-up only applies at 55+
+    if (accountType === 'hsa' && age < 55) {
+      catchUpAmount = 0;
+    }
+    
+    return inflatedStandard + catchUpAmount;
+  };
 
   const calculate = () => {
     const totalYears = inputs.deathAge - inputs.currentAge;
@@ -91,16 +167,32 @@ const RetirementCalculator = () => {
       let yearGrowthStocks = 0;
       let yearGrowthSavings = 0;
       
+      // Validate and apply catch-up contributions with IRS limits
+      // For 401k: allow user to enter super catch-up amount, but only apply it at ages 60-63
+      let validated401kCatchUp;
+      if (currentAge >= IRS_LIMITS['401k'].superCatchUpAgeMin && currentAge <= IRS_LIMITS['401k'].superCatchUpAgeMax) {
+        // Ages 60-63: validate against super catch-up limit
+        validated401kCatchUp = validateCatchUp(inputs.catchUpAmount401k, '401k', currentAge);
+      } else if (currentAge >= inputs.catchUpAge) {
+        // Ages 50-59, 64+: cap at standard catch-up even if they entered more
+        validated401kCatchUp = Math.min(inputs.catchUpAmount401k, IRS_LIMITS['401k'].catchUp);
+      } else {
+        validated401kCatchUp = 0;
+      }
+      
+      const validatedRothCatchUp = validateCatchUp(inputs.catchUpAmountRoth, 'rothIRA', currentAge);
+      const validatedHSACatchUp = validateCatchUp(inputs.catchUpAmountHSA, 'hsa', currentAge);
+
       const totalAnnualContribution401k = (isWorking && currentAge >= inputs.catchUpAge) 
-        ? annualContribution401k + inputs.catchUpAmount401k 
+        ? annualContribution401k + validated401kCatchUp 
         : annualContribution401k;
       
       const totalAnnualContributionRoth = (isWorking && currentAge >= inputs.catchUpAge) 
-        ? annualContributionRoth + inputs.catchUpAmountRoth 
+        ? annualContributionRoth + validatedRothCatchUp 
         : annualContributionRoth;
       
-      const totalAnnualContributionHSA = (isWorking && currentAge >= inputs.catchUpAge) 
-        ? annualContributionHSA + inputs.catchUpAmountHSA 
+      const totalAnnualContributionHSA = (isWorking && currentAge >= IRS_LIMITS.hsa.catchUpAge) 
+        ? annualContributionHSA + validatedHSACatchUp 
         : annualContributionHSA;
       
       for (let month = 1; month <= 12; month++) {
@@ -142,147 +234,97 @@ const RetirementCalculator = () => {
           const monthlyWithdrawal = requiredWithdrawal;
           let remaining = monthlyWithdrawal;
           
-          // Withdraw from 401k first
-          if (balance401k >= remaining) {
-            balance401k -= remaining;
-            yearWithdrawals += remaining;
-            yearTaxPaid += remaining * inputs.withdrawalTaxRate;
+          // Withdrawal priority based on age to minimize penalties
+          if (currentAge < 59.5) {
+            // Before 59.5: Prioritize penalty-free accounts
+            // Order: Taxable Stocks → Savings → Roth → HSA → 401k (with penalty)
             
-            if (currentAge < 59.5) {
-              yearPenalties += remaining * inputs.earlyWithdrawalPenaltyRate;
+            // 1. Withdraw from taxable stocks (no penalties)
+            if (remaining > 0 && balanceStocks > 0) {
+              const withdraw = Math.min(balanceStocks, remaining);
+              balanceStocks -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
             }
-            remaining = 0;
-          } else if (balance401k > 0) {
-            const partial401k = balance401k;
-            balance401k = 0;
-            yearWithdrawals += partial401k;
-            yearTaxPaid += partial401k * inputs.withdrawalTaxRate;
             
-            if (currentAge < 59.5) {
-              yearPenalties += partial401k * inputs.earlyWithdrawalPenaltyRate;
+            // 2. Withdraw from savings (no penalties)
+            if (remaining > 0 && balanceSavings > 0) {
+              const withdraw = Math.min(balanceSavings, remaining);
+              balanceSavings -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
             }
-            remaining -= partial401k;
-          }
-          
-          // Withdraw from Roth if needed
-          if (remaining > 0) {
-            if (balanceRoth >= remaining) {
-              balanceRoth -= remaining;
-              yearWithdrawals += remaining;
-              remaining = 0;
-            } else if (balanceRoth > 0) {
-              const partialRoth = balanceRoth;
-              balanceRoth = 0;
-              yearWithdrawals += partialRoth;
-              remaining -= partialRoth;
-            }
-          }
-          
-          // Withdraw from HSA if needed
-          if (remaining > 0) {
-            if (balanceHSA >= remaining) {
-              balanceHSA -= remaining;
-              yearWithdrawals += remaining;
-              remaining = 0;
-            } else if (balanceHSA > 0) {
-              const partialHSA = balanceHSA;
-              balanceHSA = 0;
-              yearWithdrawals += partialHSA;
-              remaining -= partialHSA;
-            }
-          }
-          
-          // Withdraw from taxable stocks if needed
-          if (remaining > 0) {
-            if (balanceStocks >= remaining) {
-              balanceStocks -= remaining;
-              yearWithdrawals += remaining;
-              remaining = 0;
-            } else if (balanceStocks > 0) {
-              const partialStocks = balanceStocks;
-              balanceStocks = 0;
-              yearWithdrawals += partialStocks;
-              remaining -= partialStocks;
-            }
-          }
-          
-          // Withdraw from savings as last resort
-          if (remaining > 0) {
-            if (balanceSavings >= remaining) {
-              balanceSavings -= remaining;
-              yearWithdrawals += remaining;
-              remaining = 0;
-            } else if (balanceSavings > 0) {
-              yearWithdrawals += balanceSavings;
-              balanceSavings = 0;
-            }
-          } else if (balanceRoth >= monthlyWithdrawal) {
-            balanceRoth -= monthlyWithdrawal;
-            yearWithdrawals += monthlyWithdrawal;
-          } else if (balanceRoth > 0) {
-            const fromRoth = balanceRoth;
-            const remaining = monthlyWithdrawal - fromRoth;
-            balanceRoth = 0;
             
-            if (balanceHSA >= remaining) {
-              balanceHSA -= remaining;
-            } else if (balanceHSA > 0) {
-              const fromHSA = balanceHSA;
-              const remaining2 = remaining - fromHSA;
-              balanceHSA = 0;
-              
-              if (balanceStocks >= remaining2) {
-                balanceStocks -= remaining2;
-              } else if (balanceStocks > 0) {
-                const fromStocks = balanceStocks;
-                const fromSavings = remaining2 - fromStocks;
-                balanceStocks = 0;
-                balanceSavings -= fromSavings;
-              } else {
-                balanceSavings -= remaining2;
-              }
-            } else if (balanceStocks >= remaining) {
-              balanceStocks -= remaining;
-            } else if (balanceStocks > 0) {
-              const fromStocks = balanceStocks;
-              const fromSavings = remaining - fromStocks;
-              balanceStocks = 0;
-              balanceSavings -= fromSavings;
-            } else {
-              balanceSavings -= remaining;
+            // 3. Withdraw from Roth (no penalties on contributions)
+            if (remaining > 0 && balanceRoth > 0) {
+              const withdraw = Math.min(balanceRoth, remaining);
+              balanceRoth -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
             }
-            yearWithdrawals += monthlyWithdrawal;
-          } else if (balanceHSA >= monthlyWithdrawal) {
-            balanceHSA -= monthlyWithdrawal;
-            yearWithdrawals += monthlyWithdrawal;
-          } else if (balanceHSA > 0) {
-            const fromHSA = balanceHSA;
-            const remaining = monthlyWithdrawal - fromHSA;
-            balanceHSA = 0;
             
-            if (balanceStocks >= remaining) {
-              balanceStocks -= remaining;
-            } else if (balanceStocks > 0) {
-              const fromStocks = balanceStocks;
-              const fromSavings = remaining - fromStocks;
-              balanceStocks = 0;
-              balanceSavings -= fromSavings;
-            } else {
-              balanceSavings -= remaining;
+            // 4. Withdraw from HSA (penalty-free for medical expenses after 65, but we'll use it)
+            if (remaining > 0 && balanceHSA > 0) {
+              const withdraw = Math.min(balanceHSA, remaining);
+              balanceHSA -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
             }
-            yearWithdrawals += monthlyWithdrawal;
-          } else if (balanceStocks >= monthlyWithdrawal) {
-            balanceStocks -= monthlyWithdrawal;
-            yearWithdrawals += monthlyWithdrawal;
-          } else if (balanceStocks > 0) {
-            const fromStocks = balanceStocks;
-            const fromSavings = monthlyWithdrawal - fromStocks;
-            balanceStocks = 0;
-            balanceSavings -= fromSavings;
-            yearWithdrawals += monthlyWithdrawal;
+            
+            // 5. Last resort: 401k with 10% penalty + taxes
+            if (remaining > 0 && balance401k > 0) {
+              const withdraw = Math.min(balance401k, remaining);
+              balance401k -= withdraw;
+              yearWithdrawals += withdraw;
+              yearTaxPaid += withdraw * inputs.withdrawalTaxRate;
+              yearPenalties += withdraw * inputs.earlyWithdrawalPenaltyRate;
+              remaining -= withdraw;
+            }
+            
           } else {
-            balanceSavings -= monthlyWithdrawal;
-            yearWithdrawals += monthlyWithdrawal;
+            // Age 59.5+: No penalties, prioritize tax-deferred first
+            // Order: 401k → Roth → HSA → Taxable Stocks → Savings
+            
+            // 1. Withdraw from 401k (taxed but no penalty)
+            if (remaining > 0 && balance401k > 0) {
+              const withdraw = Math.min(balance401k, remaining);
+              balance401k -= withdraw;
+              yearWithdrawals += withdraw;
+              yearTaxPaid += withdraw * inputs.withdrawalTaxRate;
+              remaining -= withdraw;
+            }
+            
+            // 2. Withdraw from Roth (tax-free)
+            if (remaining > 0 && balanceRoth > 0) {
+              const withdraw = Math.min(balanceRoth, remaining);
+              balanceRoth -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
+            }
+            
+            // 3. Withdraw from HSA (tax-free for medical)
+            if (remaining > 0 && balanceHSA > 0) {
+              const withdraw = Math.min(balanceHSA, remaining);
+              balanceHSA -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
+            }
+            
+            // 4. Withdraw from taxable stocks
+            if (remaining > 0 && balanceStocks > 0) {
+              const withdraw = Math.min(balanceStocks, remaining);
+              balanceStocks -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
+            }
+            
+            // 5. Withdraw from savings as last resort
+            if (remaining > 0 && balanceSavings > 0) {
+              const withdraw = Math.min(balanceSavings, remaining);
+              balanceSavings -= withdraw;
+              yearWithdrawals += withdraw;
+              remaining -= withdraw;
+            }
           }
         }
         
@@ -345,6 +387,9 @@ const RetirementCalculator = () => {
         growthSavings: Math.round(yearGrowthSavings),
         totalGrowth: Math.round(yearGrowth401k + yearGrowthRoth + yearGrowthHSA + yearGrowthStocks + yearGrowthSavings),
         isRetired: !isWorking,
+        irsMax401k: calculateIRSMax('401k', year, currentAge),
+        irsMaxRoth: calculateIRSMax('rothIRA', year, currentAge),
+        irsMaxHSA: calculateIRSMax('hsa', year, currentAge),
         totalContributions: year === 0 ? 
           inputs.currentBalance401k + inputs.currentBalanceRoth + inputs.currentBalanceHSA + inputs.currentBalanceStocks + inputs.currentBalanceSavings + Math.round(yearPersonalContributions401k) + Math.round(yearPersonalContributionsRoth) + Math.round(yearPersonalContributionsHSA) + Math.round(yearPersonalContributionsStocks) + Math.round(yearPersonalContributionsSavings) + Math.round(yearEmployerContributions) : 
           yearlyData[year - 1].totalContributions + Math.round(yearPersonalContributions401k) + Math.round(yearPersonalContributionsRoth) + Math.round(yearPersonalContributionsHSA) + Math.round(yearPersonalContributionsStocks) + Math.round(yearPersonalContributionsSavings) + Math.round(yearEmployerContributions)
@@ -354,9 +399,17 @@ const RetirementCalculator = () => {
       priorYearEnd401kBalance = balance401k;
       
       if (isWorking && year < totalYears) {
-        annualContribution401k += inputs.contributionIncrease401k;
-        annualContributionRoth += inputs.contributionIncreaseRoth;
-        annualContributionHSA += inputs.contributionIncreaseHSA;
+        // Calculate next year's IRS maximums
+        const nextAge = currentAge + 1;
+        const nextYear = year + 1;
+        const max401k = calculateIRSMax('401k', nextYear, nextAge);
+        const maxRoth = calculateIRSMax('rothIRA', nextYear, nextAge);
+        const maxHSA = calculateIRSMax('hsa', nextYear, nextAge);
+        
+        // Increase contributions but cap at IRS limits
+        annualContribution401k = Math.min(annualContribution401k + inputs.contributionIncrease401k, max401k);
+        annualContributionRoth = Math.min(annualContributionRoth + inputs.contributionIncreaseRoth, maxRoth);
+        annualContributionHSA = Math.min(annualContributionHSA + inputs.contributionIncreaseHSA, maxHSA);
         annualContributionStocks += inputs.contributionIncreaseStocks;
         annualContributionSavings += inputs.contributionIncreaseSavings;
         currentSalary *= (1 + inputs.salaryIncrease);
@@ -385,6 +438,26 @@ const RetirementCalculator = () => {
   const handleInputChange = (field, value) => {
     let parsedValue = parseFloat(value) || 0;
     
+    // Validate catch-up contributions against IRS limits
+    const catchUpFields = {
+      'catchUpAmount401k': '401k',
+      'catchUpAmountRoth': 'rothIRA',
+      'catchUpAmountHSA': 'hsa'
+    };
+    
+    if (catchUpFields[field]) {
+      const accountType = catchUpFields[field];
+      const limits = IRS_LIMITS[accountType];
+      
+      // For 401k: allow values up to super catch-up max, don't auto-cap
+      if (accountType === '401k') {
+        parsedValue = Math.min(parsedValue, limits.superCatchUp);
+      } else {
+        // For Roth and HSA: cap at their standard catch-up
+        parsedValue = Math.min(parsedValue, limits.catchUp);
+      }
+    }
+    
     // Round percentage fields to nearest 0.25 to avoid floating point errors
     const percentageFields = [
       'salaryIncrease', 'roi', 'roiStocks', 'roiSavings',
@@ -404,6 +477,31 @@ const RetirementCalculator = () => {
 
   const formatPercentage = (value) => {
     return Math.round(value * 100 * 100) / 100; // Round to 2 decimal places for display
+  };
+
+  // Get current catch-up limit based on age
+  const getCatchUpLimit = (accountType) => {
+    const limits = IRS_LIMITS[accountType];
+    
+    // Special handling for 401k super catch-up
+    if (accountType === '401k' && inputs.currentAge >= limits.superCatchUpAgeMin && inputs.currentAge <= limits.superCatchUpAgeMax) {
+      return limits.superCatchUp;
+    }
+    
+    return limits.catchUp;
+  };
+
+  // Get label text for catch-up showing applicable limits
+  const getCatchUpLabelText = (accountType) => {
+    if (accountType === '401k') {
+      const currentAge = inputs.currentAge;
+      if (currentAge >= IRS_LIMITS['401k'].superCatchUpAgeMin && currentAge <= IRS_LIMITS['401k'].superCatchUpAgeMax) {
+        return `Catch-Up Amount (Max: $${IRS_LIMITS['401k'].superCatchUp.toLocaleString()} at age ${currentAge})`;
+      } else {
+        return `Catch-Up Amount (Max: $${IRS_LIMITS['401k'].catchUp.toLocaleString()}, $${IRS_LIMITS['401k'].superCatchUp.toLocaleString()} ages 60-63)`;
+      }
+    }
+    return `Catch-Up Amount (Max: $${IRS_LIMITS[accountType].catchUp.toLocaleString()})`;
   };
 
   return (
@@ -515,7 +613,7 @@ const RetirementCalculator = () => {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Catch-Up Amount</label>
+              <label className="block text-sm font-medium text-gray-600 mb-1">{getCatchUpLabelText('401k')}</label>
               <input
                 type="number"
                 value={inputs.catchUpAmount401k}
@@ -606,7 +704,7 @@ const RetirementCalculator = () => {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Catch-Up Amount</label>
+              <label className="block text-sm font-medium text-gray-600 mb-1">Catch-Up Amount (Max: ${IRS_LIMITS['rothIRA'].catchUp.toLocaleString()})</label>
               <input
                 type="number"
                 value={inputs.catchUpAmountRoth}
@@ -653,7 +751,7 @@ const RetirementCalculator = () => {
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Catch-Up Amount (55+)</label>
+              <label className="block text-sm font-medium text-gray-600 mb-1">Catch-Up Amount (55+, Max: ${IRS_LIMITS['hsa'].catchUp.toLocaleString()})</label>
               <input
                 type="number"
                 value={inputs.catchUpAmountHSA}
@@ -868,32 +966,88 @@ const RetirementCalculator = () => {
       
       <div className="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
         <h2 className="text-xl font-semibold text-gray-700 mb-4">Year-by-Year Breakdown</h2>
+        
+        {/* Column Visibility Controls */}
+        <div className="mb-4 p-4 bg-gray-50 rounded-md">
+          <div className="flex flex-wrap gap-4 items-center text-sm">
+            <span className="font-semibold text-gray-700">Show Columns:</span>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={columnVisibility.contributions}
+                onChange={(e) => setColumnVisibility({...columnVisibility, contributions: e.target.checked})}
+                className="cursor-pointer"
+              />
+              <span>Contributions</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={columnVisibility.gains}
+                onChange={(e) => setColumnVisibility({...columnVisibility, gains: e.target.checked})}
+                className="cursor-pointer"
+              />
+              <span>Gains</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={columnVisibility.withdrawals}
+                onChange={(e) => setColumnVisibility({...columnVisibility, withdrawals: e.target.checked})}
+                className="cursor-pointer"
+              />
+              <span>Withdrawals/Tax/RMD</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={columnVisibility.balances}
+                onChange={(e) => setColumnVisibility({...columnVisibility, balances: e.target.checked})}
+                className="cursor-pointer"
+              />
+              <span>Account Balances</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={columnVisibility.maxContribs}
+                onChange={(e) => setColumnVisibility({...columnVisibility, maxContribs: e.target.checked})}
+                className="cursor-pointer"
+              />
+              <span>IRS Max Contributions</span>
+            </label>
+          </div>
+        </div>
+        
         <div className="text-xs text-gray-600 mb-2">Note: Table is horizontally scrollable →</div>
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-100">
               <th className="px-2 py-2 text-left sticky left-0 bg-gray-100 z-10">Age</th>
               <th className="px-2 py-2 text-right">Salary</th>
-              <th className="px-2 py-2 text-right">401k Contrib</th>
-              <th className="px-2 py-2 text-right">Roth Contrib</th>
-              <th className="px-2 py-2 text-right">HSA Contrib</th>
-              <th className="px-2 py-2 text-right">Taxable Contrib</th>
-              <th className="px-2 py-2 text-right">Savings Contrib</th>
-              <th className="px-2 py-2 text-right">Employer</th>
-              <th className="px-2 py-2 text-right">401k Gain</th>
-              <th className="px-2 py-2 text-right">Roth Gain</th>
-              <th className="px-2 py-2 text-right">HSA Gain</th>
-              <th className="px-2 py-2 text-right">Taxable Gain</th>
-              <th className="px-2 py-2 text-right">Savings Gain</th>
-              <th className="px-2 py-2 text-right">W/D</th>
-              <th className="px-2 py-2 text-right">RMD</th>
-              <th className="px-2 py-2 text-right">Tax</th>
-              <th className="px-2 py-2 text-right">Pen</th>
-              <th className="px-2 py-2 text-right">401k Bal</th>
-              <th className="px-2 py-2 text-right">Roth Bal</th>
-              <th className="px-2 py-2 text-right">HSA Bal</th>
-              <th className="px-2 py-2 text-right">Taxable Bal</th>
-              <th className="px-2 py-2 text-right">Savings Bal</th>
+              {columnVisibility.contributions && <th className="px-2 py-2 text-right">401k Contrib</th>}
+              {columnVisibility.maxContribs && <th className="px-2 py-2 text-right italic text-gray-600">401k Max</th>}
+              {columnVisibility.contributions && <th className="px-2 py-2 text-right">Roth Contrib</th>}
+              {columnVisibility.maxContribs && <th className="px-2 py-2 text-right italic text-gray-600">Roth Max</th>}
+              {columnVisibility.contributions && <th className="px-2 py-2 text-right">HSA Contrib</th>}
+              {columnVisibility.maxContribs && <th className="px-2 py-2 text-right italic text-gray-600">HSA Max</th>}
+              {columnVisibility.contributions && <th className="px-2 py-2 text-right">Taxable Contrib</th>}
+              {columnVisibility.contributions && <th className="px-2 py-2 text-right">Savings Contrib</th>}
+              {columnVisibility.contributions && <th className="px-2 py-2 text-right">Employer</th>}
+              {columnVisibility.gains && <th className="px-2 py-2 text-right">401k Gain</th>}
+              {columnVisibility.gains && <th className="px-2 py-2 text-right">Roth Gain</th>}
+              {columnVisibility.gains && <th className="px-2 py-2 text-right">HSA Gain</th>}
+              {columnVisibility.gains && <th className="px-2 py-2 text-right">Taxable Gain</th>}
+              {columnVisibility.gains && <th className="px-2 py-2 text-right">Savings Gain</th>}
+              {columnVisibility.withdrawals && <th className="px-2 py-2 text-right">W/D</th>}
+              {columnVisibility.withdrawals && <th className="px-2 py-2 text-right">RMD</th>}
+              {columnVisibility.withdrawals && <th className="px-2 py-2 text-right">Tax</th>}
+              {columnVisibility.withdrawals && <th className="px-2 py-2 text-right">Pen</th>}
+              {columnVisibility.balances && <th className="px-2 py-2 text-right">401k Bal</th>}
+              {columnVisibility.balances && <th className="px-2 py-2 text-right">Roth Bal</th>}
+              {columnVisibility.balances && <th className="px-2 py-2 text-right">HSA Bal</th>}
+              {columnVisibility.balances && <th className="px-2 py-2 text-right">Taxable Bal</th>}
+              {columnVisibility.balances && <th className="px-2 py-2 text-right">Savings Bal</th>}
               <th className="px-2 py-2 text-right">Total</th>
             </tr>
           </thead>
@@ -905,30 +1059,35 @@ const RetirementCalculator = () => {
                   {row.isRetired && <span className="ml-1 text-xs text-blue-600 font-semibold">R</span>}
                 </td>
                 <td className="px-2 py-2 text-right">{row.salary > 0 ? formatCurrency(row.salary) : '-'}</td>
-                <td className="px-2 py-2 text-right">
-                  {row.personalContributions401k > 0 ? formatCurrency(row.personalContributions401k) : '-'}
-                  {row.catchUpIncluded && <span className="ml-1 text-xs text-green-600">+</span>}
-                </td>
-                <td className="px-2 py-2 text-right">{row.personalContributionsRoth > 0 ? formatCurrency(row.personalContributionsRoth) : '-'}</td>
-                <td className="px-2 py-2 text-right">{row.personalContributionsHSA > 0 ? formatCurrency(row.personalContributionsHSA) : '-'}</td>
-                <td className="px-2 py-2 text-right">{row.personalContributionsStocks > 0 ? formatCurrency(row.personalContributionsStocks) : '-'}</td>
-                <td className="px-2 py-2 text-right">{row.personalContributionsSavings > 0 ? formatCurrency(row.personalContributionsSavings) : '-'}</td>
-                <td className="px-2 py-2 text-right">{row.employerContributions > 0 ? formatCurrency(row.employerContributions) : '-'}</td>
-                <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growth401k)}</td>
-                <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthRoth)}</td>
-                <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthHSA)}</td>
-                <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthStocks)}</td>
-                <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthSavings)}</td>
-                <td className="px-2 py-2 text-right">{row.withdrawals > 0 ? formatCurrency(row.withdrawals) : '-'}</td>
-                <td className="px-2 py-2 text-right text-orange-600">{row.rmd > 0 ? formatCurrency(row.rmd) : '-'}</td>
-                <td className="px-2 py-2 text-right text-red-600">{row.taxPaid > 0 ? formatCurrency(row.taxPaid) : '-'}</td>
-                <td className="px-2 py-2 text-right text-red-600">{row.penalties > 0 ? formatCurrency(row.penalties) : '-'}</td>
-                <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balance401k)}</td>
-                <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceRoth)}</td>
-                <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceHSA)}</td>
-                <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceStocks)}</td>
-                <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceSavings)}</td>
-                <td className="px-2 py-2 text-right font-semibold text-green-600">{formatCurrency(row.totalBalance)}</td>
+                {columnVisibility.contributions && (
+                  <td className="px-2 py-2 text-right">
+                    {row.personalContributions401k > 0 ? formatCurrency(row.personalContributions401k) : '-'}
+                    {row.catchUpIncluded && <span className="ml-1 text-xs text-green-600">+</span>}
+                  </td>
+                )}
+                {columnVisibility.maxContribs && <td className="px-2 py-2 text-right text-gray-500 italic">{formatCurrency(row.irsMax401k)}</td>}
+                {columnVisibility.contributions && <td className="px-2 py-2 text-right">{row.personalContributionsRoth > 0 ? formatCurrency(row.personalContributionsRoth) : '-'}</td>}
+                {columnVisibility.maxContribs && <td className="px-2 py-2 text-right text-gray-500 italic">{formatCurrency(row.irsMaxRoth)}</td>}
+                {columnVisibility.contributions && <td className="px-2 py-2 text-right">{row.personalContributionsHSA > 0 ? formatCurrency(row.personalContributionsHSA) : '-'}</td>}
+                {columnVisibility.maxContribs && <td className="px-2 py-2 text-right text-gray-500 italic">{formatCurrency(row.irsMaxHSA)}</td>}
+                {columnVisibility.contributions && <td className="px-2 py-2 text-right">{row.personalContributionsStocks > 0 ? formatCurrency(row.personalContributionsStocks) : '-'}</td>}
+                {columnVisibility.contributions && <td className="px-2 py-2 text-right">{row.personalContributionsSavings > 0 ? formatCurrency(row.personalContributionsSavings) : '-'}</td>}
+                {columnVisibility.contributions && <td className="px-2 py-2 text-right">{row.employerContributions > 0 ? formatCurrency(row.employerContributions) : '-'}</td>}
+                {columnVisibility.gains && <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growth401k)}</td>}
+                {columnVisibility.gains && <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthRoth)}</td>}
+                {columnVisibility.gains && <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthHSA)}</td>}
+                {columnVisibility.gains && <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthStocks)}</td>}
+                {columnVisibility.gains && <td className="px-2 py-2 text-right text-purple-600">{formatCurrency(row.growthSavings)}</td>}
+                {columnVisibility.withdrawals && <td className="px-2 py-2 text-right">{row.withdrawals > 0 ? formatCurrency(row.withdrawals) : '-'}</td>}
+                {columnVisibility.withdrawals && <td className="px-2 py-2 text-right text-orange-600">{row.rmd > 0 ? formatCurrency(row.rmd) : '-'}</td>}
+                {columnVisibility.withdrawals && <td className="px-2 py-2 text-right text-red-600">{row.taxPaid > 0 ? formatCurrency(row.taxPaid) : '-'}</td>}
+                {columnVisibility.withdrawals && <td className="px-2 py-2 text-right text-red-600">{row.penalties > 0 ? formatCurrency(row.penalties) : '-'}</td>}
+                {columnVisibility.balances && <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balance401k)}</td>}
+                {columnVisibility.balances && <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceRoth)}</td>}
+                {columnVisibility.balances && <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceHSA)}</td>}
+                {columnVisibility.balances && <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceStocks)}</td>}
+                {columnVisibility.balances && <td className="px-2 py-2 text-right font-semibold">{formatCurrency(row.balanceSavings)}</td>}
+                <td className="px-2 py-2 text-right font-bold text-green-600">{formatCurrency(row.totalBalance)}</td>
               </tr>
             ))}
           </tbody>

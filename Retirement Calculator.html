@@ -217,6 +217,11 @@
             color: #6b7280;
             margin-bottom: 0.5rem;
         }
+
+        /* Hide IRS Max Contribution columns by default */
+        .col-max-contributions {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -337,7 +342,7 @@
                 </div>
                 <div class="input-group">
                     <label>Roth IRA Catch-Up Amount</label>
-                    <input type="number" id="catchUpAmountRoth" value="1000">
+                    <input type="number" id="catchUpAmountRoth" value="1100">
                 </div>
                 <div class="input-group">
                     <label>HSA Catch-Up Amount</label>
@@ -446,6 +451,34 @@
         <!-- Data Table -->
         <div class="panel">
             <h2 class="panel-title">Year-by-Year Breakdown</h2>
+            
+            <!-- Column Visibility Controls -->
+            <div style="margin-bottom: 1rem; padding: 1rem; background-color: #f9fafb; border-radius: 6px;">
+                <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center;">
+                    <span style="font-weight: 600; color: #374151;">Show Columns:</span>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="toggleContributions" checked style="width: auto; cursor: pointer;">
+                        <span>Contributions</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="toggleGains" checked style="width: auto; cursor: pointer;">
+                        <span>Gains</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="toggleWithdrawals" checked style="width: auto; cursor: pointer;">
+                        <span>Withdrawals/Tax/RMD</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="toggleBalances" checked style="width: auto; cursor: pointer;">
+                        <span>Account Balances</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="toggleMaxContribs" style="width: auto; cursor: pointer;">
+                        <span>IRS Max Contributions</span>
+                    </label>
+                </div>
+            </div>
+            
             <p class="scroll-hint">Note: Table is horizontally scrollable →</p>
             <div class="table-wrapper">
                 <table id="dataTable">
@@ -453,26 +486,29 @@
                         <tr>
                             <th>Age</th>
                             <th>Salary</th>
-                            <th>401k Contrib</th>
-                            <th>Roth Contrib</th>
-                            <th>HSA Contrib</th>
-                            <th>Taxable Contrib</th>
-                            <th>Savings Contrib</th>
-                            <th>Employer</th>
-                            <th>401k Gain</th>
-                            <th>Roth Gain</th>
-                            <th>HSA Gain</th>
-                            <th>Taxable Gain</th>
-                            <th>Savings Gain</th>
-                            <th>W/D</th>
-                            <th>RMD</th>
-                            <th>Tax</th>
-                            <th>Pen</th>
-                            <th>401k Bal</th>
-                            <th>Roth Bal</th>
-                            <th>HSA Bal</th>
-                            <th>Taxable Bal</th>
-                            <th>Savings Bal</th>
+                            <th class="col-contributions">401k Contrib</th>
+                            <th class="col-max-contributions">401k Max</th>
+                            <th class="col-contributions">Roth Contrib</th>
+                            <th class="col-max-contributions">Roth Max</th>
+                            <th class="col-contributions">HSA Contrib</th>
+                            <th class="col-max-contributions">HSA Max</th>
+                            <th class="col-contributions">Taxable Contrib</th>
+                            <th class="col-contributions">Savings Contrib</th>
+                            <th class="col-contributions">Employer</th>
+                            <th class="col-gains">401k Gain</th>
+                            <th class="col-gains">Roth Gain</th>
+                            <th class="col-gains">HSA Gain</th>
+                            <th class="col-gains">Taxable Gain</th>
+                            <th class="col-gains">Savings Gain</th>
+                            <th class="col-withdrawals">W/D</th>
+                            <th class="col-withdrawals">RMD</th>
+                            <th class="col-withdrawals">Tax</th>
+                            <th class="col-withdrawals">Pen</th>
+                            <th class="col-balances">401k Bal</th>
+                            <th class="col-balances">Roth Bal</th>
+                            <th class="col-balances">HSA Bal</th>
+                            <th class="col-balances">Taxable Bal</th>
+                            <th class="col-balances">Savings Bal</th>
                             <th>Total</th>
                         </tr>
                     </thead>
@@ -485,6 +521,74 @@
 
     <script>
         let chart = null;
+
+        // IRS Contribution Limits (2026)
+        const IRS_LIMITS = {
+            '401k': {
+                standard: 24500,
+                catchUp: 8000,          // Age 50-59
+                superCatchUp: 11250,    // Age 60-63 (SECURE 2.0)
+                catchUpAge: 50,
+                superCatchUpAgeMin: 60,
+                superCatchUpAgeMax: 63,
+                annualIncrease: 500     // Assumed annual IRS increase
+            },
+            'rothIRA': {
+                standard: 7500,
+                catchUp: 1100,          // Age 50+
+                catchUpAge: 50,
+                annualIncrease: 500     // Assumed annual IRS increase
+            },
+            'hsa': {
+                standard: 8750,         // Family coverage
+                catchUp: 1000,          // Age 55+
+                catchUpAge: 55,
+                annualIncrease: 500     // Assumed annual IRS increase
+            }
+        };
+
+        // Validate and cap catch-up contributions to IRS limits
+        function validateCatchUp(inputValue, accountType, age) {
+            const limits = IRS_LIMITS[accountType];
+            
+            // 401k has special super catch-up for ages 60-63
+            if (accountType === '401k' && age >= limits.superCatchUpAgeMin && age <= limits.superCatchUpAgeMax) {
+                return Math.min(inputValue, limits.superCatchUp);
+            }
+            
+            const limit = limits.catchUp;
+            return Math.min(inputValue, limit);
+        }
+
+        // Calculate IRS max contribution for a given year and age
+        function calculateIRSMax(accountType, yearsFromNow, age) {
+            const limits = IRS_LIMITS[accountType];
+            
+            // Inflate the standard limit using annual increase
+            const inflatedStandard = limits.standard + (limits.annualIncrease * yearsFromNow);
+            
+            // Determine catch-up amount based on age
+            let catchUpAmount = 0;
+            if (age >= limits.catchUpAge) {
+                // Catch-up amounts also increase
+                if (accountType === '401k' && age >= limits.superCatchUpAgeMin && age <= limits.superCatchUpAgeMax) {
+                    // Super catch-up increases proportionally
+                    const catchUpIncrease = Math.round((limits.superCatchUp / limits.standard) * limits.annualIncrease);
+                    catchUpAmount = limits.superCatchUp + (catchUpIncrease * yearsFromNow);
+                } else {
+                    // Standard catch-up increases proportionally
+                    const catchUpIncrease = Math.round((limits.catchUp / limits.standard) * limits.annualIncrease);
+                    catchUpAmount = limits.catchUp + (catchUpIncrease * yearsFromNow);
+                }
+            }
+            
+            // HSA catch-up only applies at 55+
+            if (accountType === 'hsa' && age < 55) {
+                catchUpAmount = 0;
+            }
+            
+            return inflatedStandard + catchUpAmount;
+        }
 
         function formatCurrency(value) {
             return '$' + Math.round(value).toLocaleString('en-US');
@@ -587,16 +691,32 @@
                 let yearGrowthSavings = 0;
                 let catchUpIncluded = false;
 
+                // Validate and apply catch-up contributions with IRS limits
+                // For 401k: allow user to enter super catch-up amount, but only apply it at ages 60-63
+                let validated401kCatchUp;
+                if (currentAge >= IRS_LIMITS['401k'].superCatchUpAgeMin && currentAge <= IRS_LIMITS['401k'].superCatchUpAgeMax) {
+                    // Ages 60-63: validate against super catch-up limit
+                    validated401kCatchUp = validateCatchUp(inputs.catchUpAmount401k, '401k', currentAge);
+                } else if (currentAge >= inputs.catchUpAge) {
+                    // Ages 50-59, 64+: cap at standard catch-up even if they entered more
+                    validated401kCatchUp = Math.min(inputs.catchUpAmount401k, IRS_LIMITS['401k'].catchUp);
+                } else {
+                    validated401kCatchUp = 0;
+                }
+                
+                const validatedRothCatchUp = validateCatchUp(inputs.catchUpAmountRoth, 'rothIRA', currentAge);
+                const validatedHSACatchUp = validateCatchUp(inputs.catchUpAmountHSA, 'hsa', currentAge);
+
                 const totalAnnualContribution401k = (isWorking && currentAge >= inputs.catchUpAge) 
-                    ? (catchUpIncluded = true, annualContribution401k + inputs.catchUpAmount401k)
+                    ? (catchUpIncluded = true, annualContribution401k + validated401kCatchUp)
                     : annualContribution401k;
                 
                 const totalAnnualContributionRoth = (isWorking && currentAge >= inputs.catchUpAge) 
-                    ? annualContributionRoth + inputs.catchUpAmountRoth 
+                    ? annualContributionRoth + validatedRothCatchUp 
                     : annualContributionRoth;
                 
-                const totalAnnualContributionHSA = (isWorking && currentAge >= inputs.catchUpAge) 
-                    ? annualContributionHSA + inputs.catchUpAmountHSA 
+                const totalAnnualContributionHSA = (isWorking && currentAge >= IRS_LIMITS.hsa.catchUpAge) 
+                    ? annualContributionHSA + validatedHSACatchUp 
                     : annualContributionHSA;
 
                 for (let month = 1; month <= 12; month++) {
@@ -632,82 +752,98 @@
                         }
                         
                         const monthlyWithdrawal = requiredWithdrawal;
-                        
                         let remaining = monthlyWithdrawal;
                         
-                        // Withdraw from 401k first
-                        if (balance401k >= remaining) {
-                            balance401k -= remaining;
-                            yearWithdrawals += remaining;
-                            yearTaxPaid += remaining * inputs.withdrawalTaxRate;
+                        // Withdrawal priority based on age to minimize penalties
+                        if (currentAge < 59.5) {
+                            // Before 59.5: Prioritize penalty-free accounts
+                            // Order: Taxable Stocks → Savings → Roth → HSA → 401k (with penalty)
                             
-                            if (currentAge < 59.5) {
-                                yearPenalties += remaining * inputs.earlyWithdrawalPenaltyRate;
+                            // 1. Withdraw from taxable stocks (no penalties)
+                            if (remaining > 0 && balanceStocks > 0) {
+                                const withdraw = Math.min(balanceStocks, remaining);
+                                balanceStocks -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
                             }
-                            remaining = 0;
-                        } else if (balance401k > 0) {
-                            const partial401k = balance401k;
-                            balance401k = 0;
-                            yearWithdrawals += partial401k;
-                            yearTaxPaid += partial401k * inputs.withdrawalTaxRate;
                             
-                            if (currentAge < 59.5) {
-                                yearPenalties += partial401k * inputs.earlyWithdrawalPenaltyRate;
+                            // 2. Withdraw from savings (no penalties)
+                            if (remaining > 0 && balanceSavings > 0) {
+                                const withdraw = Math.min(balanceSavings, remaining);
+                                balanceSavings -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
                             }
-                            remaining -= partial401k;
-                        }
-                        
-                        // Withdraw from Roth if needed
-                        if (remaining > 0) {
-                            if (balanceRoth >= remaining) {
-                                balanceRoth -= remaining;
-                                yearWithdrawals += remaining;
-                                remaining = 0;
-                            } else if (balanceRoth > 0) {
-                                const partialRoth = balanceRoth;
-                                balanceRoth = 0;
-                                yearWithdrawals += partialRoth;
-                                remaining -= partialRoth;
+                            
+                            // 3. Withdraw from Roth (no penalties on contributions)
+                            if (remaining > 0 && balanceRoth > 0) {
+                                const withdraw = Math.min(balanceRoth, remaining);
+                                balanceRoth -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
                             }
-                        }
-                        
-                        // Withdraw from HSA if needed
-                        if (remaining > 0) {
-                            if (balanceHSA >= remaining) {
-                                balanceHSA -= remaining;
-                                yearWithdrawals += remaining;
-                                remaining = 0;
-                            } else if (balanceHSA > 0) {
-                                const partialHSA = balanceHSA;
-                                balanceHSA = 0;
-                                yearWithdrawals += partialHSA;
-                                remaining -= partialHSA;
+                            
+                            // 4. Withdraw from HSA (penalty-free for medical expenses after 65, but we'll use it)
+                            if (remaining > 0 && balanceHSA > 0) {
+                                const withdraw = Math.min(balanceHSA, remaining);
+                                balanceHSA -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
                             }
-                        }
-                        
-                        // Withdraw from taxable stocks if needed
-                        if (remaining > 0) {
-                            if (balanceStocks >= remaining) {
-                                balanceStocks -= remaining;
-                                yearWithdrawals += remaining;
-                                remaining = 0;
-                            } else if (balanceStocks > 0) {
-                                const partialStocks = balanceStocks;
-                                balanceStocks = 0;
-                                yearWithdrawals += partialStocks;
-                                remaining -= partialStocks;
+                            
+                            // 5. Last resort: 401k with 10% penalty + taxes
+                            if (remaining > 0 && balance401k > 0) {
+                                const withdraw = Math.min(balance401k, remaining);
+                                balance401k -= withdraw;
+                                yearWithdrawals += withdraw;
+                                yearTaxPaid += withdraw * inputs.withdrawalTaxRate;
+                                yearPenalties += withdraw * inputs.earlyWithdrawalPenaltyRate;
+                                remaining -= withdraw;
                             }
-                        }
-                        
-                        // Withdraw from savings as last resort
-                        if (remaining > 0) {
-                            if (balanceSavings >= remaining) {
-                                balanceSavings -= remaining;
-                                yearWithdrawals += remaining;
-                                remaining = 0;
-                            } else if (balanceSavings > 0) {
-                                yearWithdrawals += balanceSavings;
-                                balanceSavings = 0;
+                            
+                        } else {
+                            // Age 59.5+: No penalties, prioritize tax-deferred first
+                            // Order: 401k → Roth → HSA → Taxable Stocks → Savings
+                            
+                            // 1. Withdraw from 401k (taxed but no penalty)
+                            if (remaining > 0 && balance401k > 0) {
+                                const withdraw = Math.min(balance401k, remaining);
+                                balance401k -= withdraw;
+                                yearWithdrawals += withdraw;
+                                yearTaxPaid += withdraw * inputs.withdrawalTaxRate;
+                                remaining -= withdraw;
+                            }
+                            
+                            // 2. Withdraw from Roth (tax-free)
+                            if (remaining > 0 && balanceRoth > 0) {
+                                const withdraw = Math.min(balanceRoth, remaining);
+                                balanceRoth -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
+                            }
+                            
+                            // 3. Withdraw from HSA (tax-free for medical)
+                            if (remaining > 0 && balanceHSA > 0) {
+                                const withdraw = Math.min(balanceHSA, remaining);
+                                balanceHSA -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
+                            }
+                            
+                            // 4. Withdraw from taxable stocks
+                            if (remaining > 0 && balanceStocks > 0) {
+                                const withdraw = Math.min(balanceStocks, remaining);
+                                balanceStocks -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
+                            }
+                            
+                            // 5. Withdraw from savings as last resort
+                            if (remaining > 0 && balanceSavings > 0) {
+                                const withdraw = Math.min(balanceSavings, remaining);
+                                balanceSavings -= withdraw;
+                                yearWithdrawals += withdraw;
+                                remaining -= withdraw;
                             }
                         }
                     }
@@ -774,7 +910,10 @@
                     balanceSavings: balanceSavings,
                     totalBalance: totalBalance,
                     isRetired: !isWorking,
-                    catchUpIncluded: catchUpIncluded
+                    catchUpIncluded: catchUpIncluded,
+                    irsMax401k: calculateIRSMax('401k', year, currentAge),
+                    irsMaxRoth: calculateIRSMax('rothIRA', year, currentAge),
+                    irsMaxHSA: calculateIRSMax('hsa', year, currentAge)
                 });
 
                 // Update running totals
@@ -787,9 +926,17 @@
 
                 // Increase contributions and salary for next year
                 if (isWorking) {
-                    annualContribution401k += inputs.contributionIncrease401k;
-                    annualContributionRoth += inputs.contributionIncreaseRoth;
-                    annualContributionHSA += inputs.contributionIncreaseHSA;
+                    // Calculate next year's IRS maximums
+                    const nextAge = currentAge + 1;
+                    const nextYear = year + 1;
+                    const max401k = calculateIRSMax('401k', nextYear, nextAge);
+                    const maxRoth = calculateIRSMax('rothIRA', nextYear, nextAge);
+                    const maxHSA = calculateIRSMax('hsa', nextYear, nextAge);
+                    
+                    // Increase contributions but cap at IRS limits
+                    annualContribution401k = Math.min(annualContribution401k + inputs.contributionIncrease401k, max401k);
+                    annualContributionRoth = Math.min(annualContributionRoth + inputs.contributionIncreaseRoth, maxRoth);
+                    annualContributionHSA = Math.min(annualContributionHSA + inputs.contributionIncreaseHSA, maxHSA);
                     annualContributionStocks += inputs.contributionIncreaseStocks;
                     annualContributionSavings += inputs.contributionIncreaseSavings;
                     currentSalary *= (1 + inputs.salaryIncrease);
@@ -914,34 +1061,130 @@
                 tr.innerHTML = `
                     <td>${row.year}${row.isRetired ? '<span class="retired-indicator">R</span>' : ''}</td>
                     <td>${row.salary > 0 ? formatCurrency(row.salary) : '-'}</td>
-                    <td>${row.personalContributions401k > 0 ? formatCurrency(row.personalContributions401k) : '-'}${row.catchUpIncluded ? '<span class="catch-up-indicator">+</span>' : ''}</td>
-                    <td>${row.personalContributionsRoth > 0 ? formatCurrency(row.personalContributionsRoth) : '-'}</td>
-                    <td>${row.personalContributionsHSA > 0 ? formatCurrency(row.personalContributionsHSA) : '-'}</td>
-                    <td>${row.personalContributionsStocks > 0 ? formatCurrency(row.personalContributionsStocks) : '-'}</td>
-                    <td>${row.personalContributionsSavings > 0 ? formatCurrency(row.personalContributionsSavings) : '-'}</td>
-                    <td>${row.employerContributions > 0 ? formatCurrency(row.employerContributions) : '-'}</td>
-                    <td style="color: #8b5cf6;">${formatCurrency(row.growth401k)}</td>
-                    <td style="color: #8b5cf6;">${formatCurrency(row.growthRoth)}</td>
-                    <td style="color: #8b5cf6;">${formatCurrency(row.growthHSA)}</td>
-                    <td style="color: #8b5cf6;">${formatCurrency(row.growthStocks)}</td>
-                    <td style="color: #8b5cf6;">${formatCurrency(row.growthSavings)}</td>
-                    <td>${row.withdrawals > 0 ? formatCurrency(row.withdrawals) : '-'}</td>
-                    <td style="color: #f97316;">${row.rmd > 0 ? formatCurrency(row.rmd) : '-'}</td>
-                    <td style="color: #ef4444;">${row.taxPaid > 0 ? formatCurrency(row.taxPaid) : '-'}</td>
-                    <td style="color: #ef4444;">${row.penalties > 0 ? formatCurrency(row.penalties) : '-'}</td>
-                    <td style="font-weight: 600;">${formatCurrency(row.balance401k)}</td>
-                    <td style="font-weight: 600;">${formatCurrency(row.balanceRoth)}</td>
-                    <td style="font-weight: 600;">${formatCurrency(row.balanceHSA)}</td>
-                    <td style="font-weight: 600;">${formatCurrency(row.balanceStocks)}</td>
-                    <td style="font-weight: 600;">${formatCurrency(row.balanceSavings)}</td>
+                    <td class="col-contributions">${row.personalContributions401k > 0 ? formatCurrency(row.personalContributions401k) : '-'}${row.catchUpIncluded ? '<span class="catch-up-indicator">+</span>' : ''}</td>
+                    <td class="col-max-contributions" style="color: #6b7280; font-style: italic;">${formatCurrency(row.irsMax401k)}</td>
+                    <td class="col-contributions">${row.personalContributionsRoth > 0 ? formatCurrency(row.personalContributionsRoth) : '-'}</td>
+                    <td class="col-max-contributions" style="color: #6b7280; font-style: italic;">${formatCurrency(row.irsMaxRoth)}</td>
+                    <td class="col-contributions">${row.personalContributionsHSA > 0 ? formatCurrency(row.personalContributionsHSA) : '-'}</td>
+                    <td class="col-max-contributions" style="color: #6b7280; font-style: italic;">${formatCurrency(row.irsMaxHSA)}</td>
+                    <td class="col-contributions">${row.personalContributionsStocks > 0 ? formatCurrency(row.personalContributionsStocks) : '-'}</td>
+                    <td class="col-contributions">${row.personalContributionsSavings > 0 ? formatCurrency(row.personalContributionsSavings) : '-'}</td>
+                    <td class="col-contributions">${row.employerContributions > 0 ? formatCurrency(row.employerContributions) : '-'}</td>
+                    <td class="col-gains" style="color: #8b5cf6;">${formatCurrency(row.growth401k)}</td>
+                    <td class="col-gains" style="color: #8b5cf6;">${formatCurrency(row.growthRoth)}</td>
+                    <td class="col-gains" style="color: #8b5cf6;">${formatCurrency(row.growthHSA)}</td>
+                    <td class="col-gains" style="color: #8b5cf6;">${formatCurrency(row.growthStocks)}</td>
+                    <td class="col-gains" style="color: #8b5cf6;">${formatCurrency(row.growthSavings)}</td>
+                    <td class="col-withdrawals">${row.withdrawals > 0 ? formatCurrency(row.withdrawals) : '-'}</td>
+                    <td class="col-withdrawals" style="color: #f97316;">${row.rmd > 0 ? formatCurrency(row.rmd) : '-'}</td>
+                    <td class="col-withdrawals" style="color: #ef4444;">${row.taxPaid > 0 ? formatCurrency(row.taxPaid) : '-'}</td>
+                    <td class="col-withdrawals" style="color: #ef4444;">${row.penalties > 0 ? formatCurrency(row.penalties) : '-'}</td>
+                    <td class="col-balances" style="font-weight: 600;">${formatCurrency(row.balance401k)}</td>
+                    <td class="col-balances" style="font-weight: 600;">${formatCurrency(row.balanceRoth)}</td>
+                    <td class="col-balances" style="font-weight: 600;">${formatCurrency(row.balanceHSA)}</td>
+                    <td class="col-balances" style="font-weight: 600;">${formatCurrency(row.balanceStocks)}</td>
+                    <td class="col-balances" style="font-weight: 600;">${formatCurrency(row.balanceSavings)}</td>
                     <td style="font-weight: 600; color: #10b981;">${formatCurrency(row.totalBalance)}</td>
                 `;
                 tbody.appendChild(tr);
             });
         }
 
+        // Add input validation on blur for catch-up fields
+        function setupInputValidation() {
+            const catchUpInputs = {
+                'catchUpAmount401k': '401k',
+                'catchUpAmountRoth': 'rothIRA',
+                'catchUpAmountHSA': 'hsa'
+            };
+
+            Object.entries(catchUpInputs).forEach(([inputId, accountType]) => {
+                const input = document.getElementById(inputId);
+                const label = input.previousElementSibling;
+                
+                // Function to get current limit based on age
+                const getCurrentLimit = () => {
+                    const currentAge = parseFloat(document.getElementById('currentAge').value) || 0;
+                    const limits = IRS_LIMITS[accountType];
+                    
+                    // Special handling for 401k super catch-up
+                    if (accountType === '401k' && currentAge >= limits.superCatchUpAgeMin && currentAge <= limits.superCatchUpAgeMax) {
+                        return limits.superCatchUp;
+                    }
+                    
+                    return limits.catchUp;
+                };
+                
+                // Update label with current limit
+                const updateLabel = () => {
+                    const limit = getCurrentLimit();
+                    const baseLabelText = label.textContent.split('(Max:')[0].trim();
+                    
+                    // For 401k, show both limits if they differ
+                    if (accountType === '401k') {
+                        const currentAge = parseFloat(document.getElementById('currentAge').value) || 0;
+                        if (currentAge >= IRS_LIMITS['401k'].superCatchUpAgeMin && currentAge <= IRS_LIMITS['401k'].superCatchUpAgeMax) {
+                            label.textContent = `${baseLabelText} (Max: ${formatCurrency(limit)} at age ${currentAge})`;
+                        } else {
+                            label.textContent = `${baseLabelText} (Max: ${formatCurrency(IRS_LIMITS['401k'].catchUp)}, ${formatCurrency(IRS_LIMITS['401k'].superCatchUp)} ages 60-63)`;
+                        }
+                    } else {
+                        label.textContent = `${baseLabelText} (Max: ${formatCurrency(limit)})`;
+                    }
+                };
+                
+                // Initial label update
+                updateLabel();
+                
+                // Update label when current age changes
+                document.getElementById('currentAge').addEventListener('input', updateLabel);
+
+                // Visual feedback on blur - warn if exceeds absolute max but don't auto-cap
+                input.addEventListener('blur', function() {
+                    const value = parseFloat(this.value) || 0;
+                    const absoluteMax = accountType === '401k' ? IRS_LIMITS['401k'].superCatchUp : IRS_LIMITS[accountType].catchUp;
+                    
+                    if (value > absoluteMax) {
+                        // Flash orange to warn user
+                        this.style.borderColor = '#ef4444';
+                        setTimeout(() => {
+                            this.style.borderColor = '';
+                        }, 2000);
+                    }
+                });
+            });
+        }
+
+        // Setup column visibility toggles
+        function setupColumnToggles() {
+            const toggles = {
+                'toggleContributions': 'col-contributions',
+                'toggleGains': 'col-gains',
+                'toggleWithdrawals': 'col-withdrawals',
+                'toggleBalances': 'col-balances',
+                'toggleMaxContribs': 'col-max-contributions'
+            };
+
+            Object.entries(toggles).forEach(([toggleId, className]) => {
+                const toggle = document.getElementById(toggleId);
+                
+                toggle.addEventListener('change', function() {
+                    const columns = document.querySelectorAll(`.${className}`);
+                    const display = this.checked ? 'table-cell' : 'none';
+                    
+                    columns.forEach(col => {
+                        col.style.display = display;
+                    });
+                });
+            });
+        }
+
         // Calculate on page load
-        window.addEventListener('load', calculate);
+        window.addEventListener('load', () => {
+            setupInputValidation();
+            setupColumnToggles();
+            calculate();
+        });
     </script>
 </body>
 </html>
